@@ -8,51 +8,72 @@
     flake-utils.lib.eachDefaultSystem (system:
       let
         pkgs = import nixpkgs { inherit system; };
-	fakeHash = pkgs.lib.fakeHash;
-
-        # Create a separate node environment for the frontend
-        nodeEnv = pkgs.mkYarnPackage {
+        
+        # Frontend build
+        frontend = pkgs.stdenv.mkDerivation {
           name = "zrok-ui";
           src = ./agent/agentUi;
-          packageJSON = ./agent/agentUi/package.json;
-          yarnLock = ./agent/agentUi/yarn.lock;
+          
+          nativeBuildInputs = [
+            pkgs.nodejs_20
+            pkgs.nodePackages.npm
+          ];
+
+          configurePhase = ''
+            npm install --offline
+          '';
+
           buildPhase = ''
-            export HOME="$TMPDIR"
-            yarn --offline build
+            npm run build
+          '';
+
+          installPhase = ''
+            mkdir -p $out
+            cp -r dist $out/
           '';
         };
+
+        # Combined source with frontend assets
+        combinedSrc = pkgs.runCommand "zrok-combined-src" {
+          nativeBuildInputs = [ pkgs.rsync ];
+        } ''
+          cp -r ${self} $out
+          chmod -R +w $out
+          rsync -a ${frontend}/dist/ $out/agent/agentUi/dist
+        '';
+
       in {
+        packages = {
+          frontend = frontend;
+          default = pkgs.buildGoModule {
+            pname = "zrok";
+            version = "1.0.0";
+            src = combinedSrc;
+
+            nativeBuildInputs = [
+              pkgs.gcc
+            ];
+
+            vendorHash = "sha256-JEpjinCLul8oMGlUgFtdXjfYXpu+03uWxTMNOTjt9n8=";
+
+            meta = {
+              description = "Geo-scale, next-generation sharing platform built on OpenZiti";
+            };
+          };
+        };
+
         devShells.default = pkgs.mkShell {
-	  packages = [
-	    pkgs.nodejs
-	    pkgs.nodePackages.npm
-	    pkgs.yarn
-	    nodeEnv
-	  ];
-	};
-        packages.default = pkgs.buildGoModule {
-          pname = "zrok";
-          version = "1.0.0";  # Update or use git revision
-          src = ./.;
-          # vendorHash = fakeHash;  # Temporary placeholder; uncomment on 1st version changes
-          vendorHash = "sha256-JEpjinCLul8oMGlUgFtdXjfYXpu+03uWxTMNOTjt9n8=";
+          packages = [
+            pkgs.go
+            pkgs.gcc
+            pkgs.nodejs_20
+            pkgs.nodePackages.npm
+          ];
 
-          # Add Node.js and npm to build the frontend
-          nativeBuildInputs = [
-	    pkgs.nodejs
-	    pkgs.nodePackages.npm
-	    pkgs.rsync
-	  ];
-
-          preBuild = ''
-            # Copy built frontend assets into Go project
-            echo "=== SOURCE ASSETS ==="
-            ls -la ${nodeEnv}/libexec/agentui/deps/agentui/dist
-            
-            echo "=== TARGET LOCATION ==="
-            mkdir -p ui/dist
-            cp -rv ${nodeEnv}/libexec/agentui/deps/agentui/dist/* ui/dist/
-            ls -la ui/dist
+          shellHook = ''
+            echo "Run manual build commands:"
+            echo "1. cd agent/agentUi && npm install && npm run build"
+            echo "2. cd ../.. && mkdir -p dist && go build -o dist ./..."
           '';
         };
       }
