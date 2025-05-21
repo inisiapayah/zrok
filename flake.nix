@@ -5,7 +5,11 @@
   };
 
   outputs = { self, nixpkgs, flake-utils }:
-    flake-utils.lib.eachDefaultSystem (system:
+    let
+      zrok-overlay = final: prev: {
+        zrok = self.packages.${prev.system}.default;
+      };
+    in (flake-utils.lib.eachDefaultSystem (system:
       let
         pkgs = import nixpkgs { inherit system; };
 	fakeHash = pkgs.lib.fakeHash;
@@ -114,6 +118,9 @@
             echo "2. cd ../.. && mkdir -p dist && go build -o dist ./..."
           '';
         };
+
       }
-    );
+    )) // {
+      overlays.default = zrok-overlay;
+    };
 }
